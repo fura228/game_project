@@ -1,14 +1,14 @@
-﻿using System;
+using System;
 using System.ComponentModel;
 using System.Drawing;
 using System.Text.Json;
 
 /// <summary>
-/// TODO: возможность сдачи (выход при текущей игре)
-/// проверить на всевозможные ошибки
+/// TODO: 
+/// DONE
 /// реализовать енам и еще пару штук из списка (не все использовалось)
-/// доработать бота (выбор лучшего хода (добавить усложненного бота))
-/// сдела
+/// DONE 
+/// DONE
 /// </summary>
 
 // Базовый класс для игрока
@@ -24,7 +24,7 @@ public abstract class Player
     }
 
     // Полиморфизм: каждый игрок по-своему делает ход
-    public abstract (int row, int col) MakeMove(ReversiBoard board);
+    public abstract (int row, int col)? MakeMove(ReversiBoard board);
 }
 
 public class AIPlayer : Player
@@ -33,7 +33,7 @@ public class AIPlayer : Player
     {
         
     }
-    //код снизу до мейкмув надо переписать (он встречается два раза, пока не знаю как реализовать совместно с мультиплеером)
+
     private const int SIZE = 8;
     public const char EMPTY = '.';
     public const char BLACK = 'B';
@@ -92,7 +92,7 @@ public class AIPlayer : Player
 
         return result;
     }
-    public override (int row, int col) MakeMove(ReversiBoard board)
+    public override (int row, int col)? MakeMove(ReversiBoard board)
     {
         var validMoves = ValidMovesAI(board, WHITE);
         Console.WriteLine($"Найдено допустимых ходов: {validMoves.GetLength(0)}");
@@ -104,7 +104,8 @@ public class AIPlayer : Player
         int c = validMoves[index, 1]; 
 
         Console.WriteLine($"Бот делает ход: {r}, {c}");
-        System.Threading.Thread.Sleep(5000);
+        Console.WriteLine("Нажмите Enter, чтобы продолжить...");
+        Console.ReadKey(intercept: true);
         return (r, c);
     }
 }
@@ -114,13 +115,18 @@ public class HumanPlayer : Player
 {
     public HumanPlayer(string name, char symbol) : base(name, symbol) { }
 
-    public override (int row, int col) MakeMove(ReversiBoard board)
+    public override (int row, int col)? MakeMove(ReversiBoard board)
     {
         while (true)
         {
-            Console.Write($"{Name}, введите строку и столбец (например: 4 5): ");
+            Console.Write($"{Name}, введите строку и столбец (например: 4 5) или exit для выхода: ");
             string? input = Console.ReadLine();
             if (string.IsNullOrWhiteSpace(input)) continue;
+            if (input == "exit")
+            {
+                return null;
+                
+            }
 
             string[] parts = input.Split(' ', StringSplitOptions.RemoveEmptyEntries);
             if (parts.Length != 2) continue;
@@ -427,6 +433,7 @@ public class ReversiGame
     private Player player1;
     private Player player2;
     private bool gameRunning = true;
+    private Player? _abandonedBy;
 
     public ReversiGame(Player p1, Player p2)
     {
@@ -447,6 +454,7 @@ public class ReversiGame
 
             var scores = board.GetScores();
             Console.WriteLine($"{player1.Name} (●): {scores.black} | {player2.Name} (●): {scores.white}\n");
+            
 
             if (!board.HasValidMoves(currentPlayerSymbol))
             {
@@ -463,14 +471,23 @@ public class ReversiGame
                 continue;
             }
 
-            (int row, int col) = currentPlayer.MakeMove(board);
+            var move = currentPlayer.MakeMove(board);
+
+            if (move == null)
+            {
+                Abandoned(currentPlayer);
+                EndGame();
+                return; 
+            }
+
+            int row = move.Value.Item1;
+            int col = move.Value.Item2;
 
             if (row == -2 || col == -2) // Сигнал выхода — не используется в текущей реализации, но можно расширить
             {
                 gameRunning = false;
                 return;
             }
-
             if (board.IsValidMove(row, col, currentPlayerSymbol))
             {
                 board.MakeMove(row, col, currentPlayerSymbol);
@@ -487,18 +504,30 @@ public class ReversiGame
             currentPlayerSymbol = currentPlayerSymbol == ReversiBoard.BLACK ? ReversiBoard.WHITE : ReversiBoard.BLACK;
         }
     }
+    private void Abandoned(Player playerGaveUp)
+    {
+        _abandonedBy = playerGaveUp;
+        EndGame();
 
+    }
     private void EndGame()
     {
         var scores = board.GetScores();
         Console.Clear();
         board.Display();
         Console.WriteLine("Игра завершена!");
+        
         Console.WriteLine($"{player1.Name}: {scores.black}");
         Console.WriteLine($"{player2.Name}: {scores.white}");
 
         string winnerName = scores.black > scores.white ? player1.Name :
                         scores.white > scores.black ? player2.Name : "Ничья!";
+        if (_abandonedBy != null)
+        {
+            Console.WriteLine($"\n{_abandonedBy.Name} сдался.");
+
+            winnerName = _abandonedBy == player1 ? player2.Name : player1.Name;
+        }
         if (winnerName != null)
         {
             Console.WriteLine($"\nПобедитель: {winnerName}!");
@@ -522,7 +551,8 @@ public class Program
             Console.WriteLine("1. Ввести имена игроков и начать игру");
             Console.WriteLine("2. Игра с ботом");
             Console.WriteLine("3. Ranked Ladder");
-            Console.WriteLine("4. Выйти из игры");
+            Console.WriteLine("4. Правила");
+            Console.WriteLine("5. Выйти из игры");
             Console.Write("Выберите действие: ");
 
             string? choice = Console.ReadLine();
@@ -557,11 +587,15 @@ public class Program
                     Console.WriteLine("Нажмите любую клавишу для возврата...");
                     Console.ReadKey();
                     break;
-
-
-
-
                 case "4":
+                    Console.WriteLine("В игре используется квадратная доска размером 8 × 8 клеток (все клетки могут быть одного цвета) и 64 специальные фишки, окрашенные с разных сторон в контрастные цвета, например, в белый и чёрный. Клетки доски нумеруются от верхнего левого угла: вертикали — латинскими буквами, горизонтали — цифрами (по сути дела, можно использовать шахматную доску). Один из игроков играет белыми, другой — чёрными. Делая ход, игрок ставит фишку на клетку доски «своим» цветом вверх.\r\n\r\nВ начале игры в центр доски выставляются 4 фишки: чёрные на d5 и e4, белые на d4 и e5.\r\n\r\nПервый ход делают чёрные. Далее игроки ходят по очереди.\r\nДелая ход, игрок должен поставить свою фишку на одну из клеток доски таким образом, чтобы между этой поставленной фишкой и одной из имеющихся уже на доске фишек его цвета находился непрерывный ряд фишек соперника, горизонтальный, вертикальный или диагональный (другими словами, чтобы непрерывный ряд фишек соперника оказался «закрыт» фишками игрока с двух сторон). Все фишки соперника, входящие в «закрытый» на этом ходу ряд, переворачиваются на другую сторону (меняют цвет) и переходят к ходившему игроку.\r\nЕсли в результате одного хода «закрывается» одновременно более одного ряда фишек противника, то переворачиваются все фишки, оказавшиеся на тех «закрытых» рядах, которые идут от поставленной фишки.\r\nИгрок вправе выбирать любой из возможных для него ходов. Если игрок имеет возможные ходы, он не может отказаться от хода. Если игрок не имеет допустимых ходов, то ход передаётся сопернику.\r\nИгра прекращается, когда на доску выставлены все фишки или когда ни один из игроков не может сделать хода. По окончании игры проводится подсчёт фишек каждого цвета, и игрок, чьих фишек на доске выставлено больше, объявляется победителем. В случае равенства количества фишек засчитывается ничья.");
+                    Console.ReadKey();
+                    break;
+
+
+
+
+                case "5":
                     Console.WriteLine("Выход из игры...");
                     return;
 
