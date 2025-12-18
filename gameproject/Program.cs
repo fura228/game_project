@@ -4,11 +4,11 @@ using System.Drawing;
 using System.Text.Json;
 
 /// <summary>
-/// TODO: возможность сдачи (выход при текущей игре)
-/// проверить на всевозможные ошибки
+/// TODO: 
+/// DONE
 /// реализовать енам и еще пару штук из списка (не все использовалось)
-/// доработать бота (выбор лучшего хода (добавить усложненного бота))
-/// сдела
+/// DONE 
+/// DONE
 /// </summary>
 
 // Базовый класс для игрока
@@ -29,9 +29,9 @@ public abstract class Player
 
 public class AIPlayer : Player
 {
-    public AIPlayer(string name, char symbol) : base(name, symbol) 
+    public AIPlayer(string name, char symbol) : base(name, symbol)
     {
-        
+
     }
 
     private const int SIZE = 8;
@@ -101,7 +101,7 @@ public class AIPlayer : Player
         Random random = new Random();
         int index = random.Next(0, validMoves.GetLength(0)); // Случайный индекс строки
         int r = validMoves[index, 0];
-        int c = validMoves[index, 1]; 
+        int c = validMoves[index, 1];
 
         Console.WriteLine($"Бот делает ход: {r}, {c}");
         Console.WriteLine("Нажмите Enter, чтобы продолжить...");
@@ -125,7 +125,7 @@ public class HumanPlayer : Player
             if (input == "exit")
             {
                 return null;
-                
+
             }
 
             string[] parts = input.Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -149,12 +149,17 @@ public class PlayerScore
 {
     public string Name { get; set; }
     public int Wins { get; set; }
+    public int GamesPlayed { get; set; } 
 
-    public PlayerScore(string name, int wins = 0)
+    public PlayerScore(string name, int wins = 0, int gamesPlayed = 0)
     {
         Name = name;
         Wins = wins;
+        GamesPlayed = gamesPlayed;
     }
+
+
+    public double WinRate => GamesPlayed == 0 ? 0 : (double)Wins / GamesPlayed * 100;
 }
 
 // Менеджер рейтинга — загружает, сохраняет, обновляет
@@ -234,18 +239,19 @@ public static class ScoreManager
     // Вывести топ-N игроков (снимаем грядущую проблему в несколько сотен тысяч игроков)
     public static void ShowLeaderboard(int topN = 10)
     {
-        Console.WriteLine("\n" + new string('=', 30));
-        Console.WriteLine("    ТАБЛИЦА ЛИДЕРОВ    ");
-        Console.WriteLine(new string('=', 30));
-        Console.WriteLine("Место  Имя".PadRight(20) + " Победы");
-        Console.WriteLine(new string('-', 30));
+        Console.WriteLine("\n" + new string('=', 50));
+        Console.WriteLine(" ТАБЛИЦА ЛИДЕРОВ ");
+        Console.WriteLine(new string('=', 50));
+        Console.WriteLine("№  Имя".PadRight(20) + " Победы  Игры   %");
+        Console.WriteLine(new string('-', 50));
 
         var ranked = Scores
-            .Where(p => p.Wins > 0)
-            .OrderByDescending(p => p.Wins)
-            .ThenBy(p => p.Name)
-            .Take(topN)
-            .ToList();
+        .Where(p => p.GamesPlayed > 0)  // Только те, кто играл
+        .OrderByDescending(p => p.WinRate)  // Сначала по % побед
+        .ThenByDescending(p => p.Wins)      // Потом по числу побед
+        .ThenBy(p => p.Name)                // Потом по имени
+        .Take(topN)
+        .ToList();
 
         if (ranked.Count == 0)
         {
@@ -256,10 +262,18 @@ public static class ScoreManager
             for (int i = 0; i < ranked.Count; i++)
             {
                 var p = ranked[i];
-                Console.WriteLine($"{(i + 1),3}.   {p.Name.PadRight(15)} {p.Wins,3}");
+                double rate = Math.Round(p.WinRate, 1);
+                Console.WriteLine($"{(i + 1),2}. {p.Name.PadRight(16)} {p.Wins,5}  {p.GamesPlayed,5}  {rate,5:F1}%");
             }
         }
         Console.WriteLine(new string('=', 30) + "\n");
+    }
+    public static void RecordGame(string playerName)
+    {
+        if (string.IsNullOrWhiteSpace(playerName)) return;
+        var player = GetOrCreate(playerName);
+        player.GamesPlayed++;
+        SaveScores();
     }
 }
 
@@ -454,7 +468,7 @@ public class ReversiGame
 
             var scores = board.GetScores();
             Console.WriteLine($"{player1.Name} (●): {scores.black} | {player2.Name} (●): {scores.white}\n");
-            
+
 
             if (!board.HasValidMoves(currentPlayerSymbol))
             {
@@ -477,7 +491,7 @@ public class ReversiGame
             {
                 Abandoned(currentPlayer);
                 EndGame();
-                return; 
+                return;
             }
 
             int row = move.Value.Item1;
@@ -507,7 +521,6 @@ public class ReversiGame
     private void Abandoned(Player playerGaveUp)
     {
         _abandonedBy = playerGaveUp;
-        EndGame();
 
     }
     private void EndGame()
@@ -515,24 +528,41 @@ public class ReversiGame
         var scores = board.GetScores();
         Console.Clear();
         board.Display();
-        Console.WriteLine("Игра завершена!");
-        
+        Console.WriteLine("Игра завершена!\n");
+
         Console.WriteLine($"{player1.Name}: {scores.black}");
         Console.WriteLine($"{player2.Name}: {scores.white}");
 
-        string winnerName = scores.black > scores.white ? player1.Name :
-                        scores.white > scores.black ? player2.Name : "Ничья!";
+        string? winnerName = null;
+
         if (_abandonedBy != null)
         {
             Console.WriteLine($"\n{_abandonedBy.Name} сдался.");
-
             winnerName = _abandonedBy == player1 ? player2.Name : player1.Name;
         }
+        else if (scores.black > scores.white)
+        {
+            winnerName = player1.Name;
+        }
+        else if (scores.white > scores.black)
+        {
+            winnerName = player2.Name;
+        }
+        else
+        {
+            Console.WriteLine("\nНичья!");
+        }
+
+        ScoreManager.RecordGame(player1.Name);
+        ScoreManager.RecordGame(player2.Name);
+
+        // Записываем победу (если есть победитель)
         if (winnerName != null)
         {
             Console.WriteLine($"\nПобедитель: {winnerName}!");
             ScoreManager.RecordWin(winnerName);
         }
+
         Console.WriteLine("\nНажмите любую клавишу для возврата в меню...");
         Console.ReadKey();
     }
@@ -541,6 +571,7 @@ public class ReversiGame
 // Главное меню и запуск
 public class Program
 {
+    enum Choices { twoPlayers = 1, playAI, ladder, rules, exit}
     public static void Main()
     {
         Console.OutputEncoding = System.Text.Encoding.UTF8;
@@ -555,13 +586,21 @@ public class Program
             Console.WriteLine("5. Выйти из игры");
             Console.Write("Выберите действие: ");
 
-            string? choice = Console.ReadLine();
-            switch (choice?.Trim())
+            string? input = Console.ReadLine()?.Trim();
+            if (!int.TryParse(input, out int choiceNum) || !Enum.IsDefined(typeof(Choices), choiceNum))
             {
-                case "1":
+                Console.WriteLine("Неверный выбор. Попробуйте снова.");
+                System.Threading.Thread.Sleep(1000);
+                continue;
+            }
+            Choices choice = (Choices)choiceNum;
+
+            switch (choice)
+            {
+                case Choices.twoPlayers:
                     Console.Write("Имя первого игрока (● Чёрные): ");
                     string p1Name = Console.ReadLine() ?? "Игрок 1";
-                    
+
                     Console.Write("Имя второго игрока (● Белые): ");
                     string p2Name = Console.ReadLine() ?? "Игрок 2";
 
@@ -571,8 +610,8 @@ public class Program
                     var game = new ReversiGame(player1, player2);
                     game.Start();
                     break;
-                
-                case "2":
+
+                case Choices.playAI:
                     Console.Write("Имя игрока: ");
                     string p1name = Console.ReadLine() ?? "Игрок";
                     var pLayer1 = new HumanPlayer(p1name, ReversiBoard.BLACK);
@@ -582,12 +621,12 @@ public class Program
                     game1.Start();
                     break;
 
-                case "3":
+                case Choices.ladder:
                     ScoreManager.ShowLeaderboard(15);
                     Console.WriteLine("Нажмите любую клавишу для возврата...");
                     Console.ReadKey();
                     break;
-                case "4":
+                case Choices.rules:
                     Console.WriteLine("В игре используется квадратная доска размером 8 × 8 клеток (все клетки могут быть одного цвета) и 64 специальные фишки, окрашенные с разных сторон в контрастные цвета, например, в белый и чёрный. Клетки доски нумеруются от верхнего левого угла: вертикали — латинскими буквами, горизонтали — цифрами (по сути дела, можно использовать шахматную доску). Один из игроков играет белыми, другой — чёрными. Делая ход, игрок ставит фишку на клетку доски «своим» цветом вверх.\r\n\r\nВ начале игры в центр доски выставляются 4 фишки: чёрные на d5 и e4, белые на d4 и e5.\r\n\r\nПервый ход делают чёрные. Далее игроки ходят по очереди.\r\nДелая ход, игрок должен поставить свою фишку на одну из клеток доски таким образом, чтобы между этой поставленной фишкой и одной из имеющихся уже на доске фишек его цвета находился непрерывный ряд фишек соперника, горизонтальный, вертикальный или диагональный (другими словами, чтобы непрерывный ряд фишек соперника оказался «закрыт» фишками игрока с двух сторон). Все фишки соперника, входящие в «закрытый» на этом ходу ряд, переворачиваются на другую сторону (меняют цвет) и переходят к ходившему игроку.\r\nЕсли в результате одного хода «закрывается» одновременно более одного ряда фишек противника, то переворачиваются все фишки, оказавшиеся на тех «закрытых» рядах, которые идут от поставленной фишки.\r\nИгрок вправе выбирать любой из возможных для него ходов. Если игрок имеет возможные ходы, он не может отказаться от хода. Если игрок не имеет допустимых ходов, то ход передаётся сопернику.\r\nИгра прекращается, когда на доску выставлены все фишки или когда ни один из игроков не может сделать хода. По окончании игры проводится подсчёт фишек каждого цвета, и игрок, чьих фишек на доске выставлено больше, объявляется победителем. В случае равенства количества фишек засчитывается ничья.");
                     Console.ReadKey();
                     break;
@@ -595,14 +634,11 @@ public class Program
 
 
 
-                case "5":
+                case Choices.exit:
                     Console.WriteLine("Выход из игры...");
                     return;
 
-                default:
-                    Console.WriteLine("Неверный выбор.");
-                    System.Threading.Thread.Sleep(1000);
-                    break;
+
             }
         }
     }
