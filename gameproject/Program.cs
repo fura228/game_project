@@ -1,7 +1,10 @@
-﻿using System;
+using System;
 using System.ComponentModel;
 using System.Drawing;
 using System.Text.Json;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 
 /// <summary>
 /// TODO: 
@@ -10,6 +13,71 @@ using System.Text.Json;
 /// DONE 
 /// DONE
 /// </summary>
+
+// DTO для сохранения игры
+public class SavedGame
+{
+    public string[] Board { get; set; } = new string[8];
+    public string Player1Name { get; set; } = "";
+    public string Player2Name { get; set; } = "";
+    public bool IsPlayer1Human { get; set; }
+    public bool IsPlayer2Human { get; set; }
+    public char CurrentPlayerSymbol { get; set; }
+}
+
+public static class GameSaver
+{
+    private const string SaveFilePath = "saved_game.json";
+
+    public static void SaveGame(ReversiBoard board, Player p1, Player p2, char currentPlayerSymbol)
+    {
+        var saved = new SavedGame
+        {
+            Board = new string[8],
+            Player1Name = p1.Name,
+            Player2Name = p2.Name,
+            IsPlayer1Human = p1 is HumanPlayer,
+            IsPlayer2Human = p2 is HumanPlayer,
+            CurrentPlayerSymbol = currentPlayerSymbol
+        };
+
+        for (int i = 0; i < 8; i++)
+        {
+            char[] row = new char[8];
+            for (int j = 0; j < 8; j++)
+            {
+                row[j] = board.GetCell(i, j);
+            }
+            saved.Board[i] = new string(row);
+        }
+
+        var options = new JsonSerializerOptions { WriteIndented = true };
+        string json = JsonSerializer.Serialize(saved, options);
+        File.WriteAllText(SaveFilePath, json);
+    }
+
+    public static SavedGame? LoadSavedGame()
+    {
+        if (!File.Exists(SaveFilePath)) return null;
+        try
+        {
+            string json = File.ReadAllText(SaveFilePath);
+            return JsonSerializer.Deserialize<SavedGame>(json);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public static bool HasSavedGame() => File.Exists(SaveFilePath);
+
+    public static void DeleteSavedGame()
+    {
+        if (File.Exists(SaveFilePath))
+            File.Delete(SaveFilePath);
+    }
+}
 
 // Базовый класс для игрока
 public abstract class Player
@@ -38,10 +106,10 @@ public class AIPlayer : Player
     public const char EMPTY = '.';
     public const char BLACK = 'B';
     public const char WHITE = 'W';
-    public int[,] ValidMovesAI(ReversiBoard gameBoard, char playerSymbol)
+
+    private List<(int row, int col)> GetValidMoves(ReversiBoard gameBoard, char playerSymbol)
     {
         char opponent = playerSymbol == BLACK ? WHITE : BLACK;
-
         List<(int row, int col)> movesList = new List<(int, int)>();
 
         int[] dr = { -1, -1, -1, 0, 0, 1, 1, 1 };
@@ -82,31 +150,24 @@ public class AIPlayer : Player
             }
         }
 
-        // Преобразуем в массив
-        int[,] result = new int[movesList.Count, 2];
-        for (int i = 0; i < movesList.Count; i++)
-        {
-            result[i, 0] = movesList[i].row;
-            result[i, 1] = movesList[i].col;
-        }
-
-        return result;
+        return movesList;
     }
+
     public override (int row, int col)? MakeMove(ReversiBoard board)
     {
-        var validMoves = ValidMovesAI(board, WHITE);
-        Console.WriteLine($"Найдено допустимых ходов: {validMoves.GetLength(0)}");
+        var validMoves = GetValidMoves(board, Symbol);
+        Console.WriteLine($"Найдено допустимых ходов: {validMoves.Count}");
 
+        if (validMoves.Count == 0)
+            return null;
 
         Random random = new Random();
-        int index = random.Next(0, validMoves.GetLength(0)); // Случайный индекс строки
-        int r = validMoves[index, 0];
-        int c = validMoves[index, 1];
+        var move = validMoves[random.Next(validMoves.Count)];
 
-        Console.WriteLine($"Бот делает ход: {r+1}, {c+1}");
+        Console.WriteLine($"Бот делает ход: {move.row + 1}, {move.col + 1}");
         Console.WriteLine("Нажмите Enter, чтобы продолжить...");
         Console.ReadKey(intercept: true);
-        return (r, c);
+        return (move.row, move.col);
     }
 }
 
@@ -119,13 +180,16 @@ public class HumanPlayer : Player
     {
         while (true)
         {
-            Console.Write($"{Name}, введите строку и столбец (например: 4 5) или exit для выхода: ");
+            Console.Write($"{Name}, введите строку и столбец (например: 4 5), 'save' для сохранения или exit для выхода: ");
             string? input = Console.ReadLine();
             if (string.IsNullOrWhiteSpace(input)) continue;
             if (input == "exit")
             {
                 return null;
-
+            }
+            if (input == "save")
+            {
+                return (-2, -2);
             }
 
             string[] parts = input.Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -149,7 +213,7 @@ public class PlayerScore
 {
     public string Name { get; set; }
     public int Wins { get; set; }
-    public int GamesPlayed { get; set; } 
+    public int GamesPlayed { get; set; }
 
     public PlayerScore(string name, int wins = 0, int gamesPlayed = 0)
     {
@@ -310,6 +374,17 @@ public class ReversiBoard
         board[4, 3] = BLACK;
     }
 
+    public void LoadFromStrings(string[] rows)
+    {
+        for (int i = 0; i < SIZE; i++)
+        {
+            for (int j = 0; j < SIZE; j++)
+            {
+                board[i, j] = rows[i][j];
+            }
+        }
+    }
+
     public char GetCell(int row, int col) => board[row, col];
 
     public bool IsValidMove(int row, int col, char playerSymbol)
@@ -460,7 +535,23 @@ public class ReversiGame
     {
         char currentPlayerSymbol = ReversiBoard.BLACK;
         Player currentPlayer = player1;
+        RunGameLoop(currentPlayer, currentPlayerSymbol);
+    }
 
+    public void ResumeFrom(SavedGame saved)
+    {
+        var loadedBoard = new ReversiBoard();
+        loadedBoard.LoadFromStrings(saved.Board);
+        board = loadedBoard;
+
+        char currentPlayerSymbol = saved.CurrentPlayerSymbol;
+        Player currentPlayer = currentPlayerSymbol == ReversiBoard.BLACK ? player1 : player2;
+
+        RunGameLoop(currentPlayer, currentPlayerSymbol);
+    }
+
+    private void RunGameLoop(Player currentPlayer, char currentPlayerSymbol)
+    {
         while (gameRunning)
         {
             Console.Clear();
@@ -468,7 +559,6 @@ public class ReversiGame
 
             var scores = board.GetScores();
             Console.WriteLine($"{player1.Name} (●): {scores.black} | {player2.Name} (●): {scores.white}\n");
-
 
             if (!board.HasValidMoves(currentPlayerSymbol))
             {
@@ -494,14 +584,17 @@ public class ReversiGame
                 return;
             }
 
-            int row = move.Value.Item1;
-            int col = move.Value.Item2;
-
-            if (row == -2 || col == -2) // Сигнал выхода — не используется в текущей реализации, но можно расширить
+            // Обработка сохранения
+            if (move.Value.row == -2 && move.Value.col == -2)
             {
+                GameSaver.SaveGame(board, player1, player2, currentPlayerSymbol);
                 gameRunning = false;
                 return;
             }
+
+            int row = move.Value.row;
+            int col = move.Value.col;
+
             if (board.IsValidMove(row, col, currentPlayerSymbol))
             {
                 board.MakeMove(row, col, currentPlayerSymbol);
@@ -518,11 +611,12 @@ public class ReversiGame
             currentPlayerSymbol = currentPlayerSymbol == ReversiBoard.BLACK ? ReversiBoard.WHITE : ReversiBoard.BLACK;
         }
     }
+
     private void Abandoned(Player playerGaveUp)
     {
         _abandonedBy = playerGaveUp;
-
     }
+
     private void EndGame()
     {
         var scores = board.GetScores();
@@ -563,6 +657,8 @@ public class ReversiGame
             ScoreManager.RecordWin(winnerName);
         }
 
+        GameSaver.DeleteSavedGame();
+
         Console.WriteLine("\nНажмите любую клавишу для возврата в меню...");
         Console.ReadKey();
     }
@@ -571,7 +667,7 @@ public class ReversiGame
 // Главное меню и запуск
 public class Program
 {
-    enum Choices { twoPlayers = 1, playAI, ladder, rules, exit}
+    enum Choices { twoPlayers = 1, playAI, ladder, rules, continueGame, exit }
     public static void Main()
     {
         Console.OutputEncoding = System.Text.Encoding.UTF8;
@@ -583,7 +679,15 @@ public class Program
             Console.WriteLine("2. Игра с ботом");
             Console.WriteLine("3. Ranked Ladder");
             Console.WriteLine("4. Правила");
-            Console.WriteLine("5. Выйти из игры");
+            if (GameSaver.HasSavedGame())
+            {
+                Console.WriteLine("5. Продолжить игру");
+                Console.WriteLine("6. Выйти из игры");
+            }    
+                
+            else
+                Console.WriteLine("5. Выйти из игры");
+            
             Console.Write("Выберите действие: ");
 
             string? input = Console.ReadLine()?.Trim();
@@ -627,20 +731,35 @@ public class Program
                     Console.ReadKey();
                     break;
                 case Choices.rules:
-                    Console.WriteLine("В игре используется квадратная доска размером 8 × 8 клеток (все клетки могут быть одного цвета) и 64 специальные фишки, окрашенные с разных сторон в контрастные цвета, например, в белый и чёрный. Клетки доски нумеруются от верхнего левого угла: вертикали — латинскими буквами, горизонтали — цифрами (по сути дела, можно использовать шахматную доску). Один из игроков играет белыми, другой — чёрными. Делая ход, игрок ставит фишку на клетку доски «своим» цветом вверх.\r\n\r\nВ начале игры в центр доски выставляются 4 фишки: чёрные на d5 и e4, белые на d4 и e5.\r\n\r\nПервый ход делают чёрные. Далее игроки ходят по очереди.\r\nДелая ход, игрок должен поставить свою фишку на одну из клеток доски таким образом, чтобы между этой поставленной фишкой и одной из имеющихся уже на доске фишек его цвета находился непрерывный ряд фишек соперника, горизонтальный, вертикальный или диагональный (другими словами, чтобы непрерывный ряд фишек соперника оказался «закрыт» фишками игрока с двух сторон). Все фишки соперника, входящие в «закрытый» на этом ходу ряд, переворачиваются на другую сторону (меняют цвет) и переходят к ходившему игроку.\r\nЕсли в результате одного хода «закрывается» одновременно более одного ряда фишек противника, то переворачиваются все фишки, оказавшиеся на тех «закрытых» рядах, которые идут от поставленной фишки.\r\nИгрок вправе выбирать любой из возможных для него ходов. Если игрок имеет возможные ходы, он не может отказаться от хода. Если игрок не имеет допустимых ходов, то ход передаётся сопернику.\r\nИгра прекращается, когда на доску выставлены все фишки или когда ни один из игроков не может сделать хода. По окончании игры проводится подсчёт фишек каждого цвета, и игрок, чьих фишек на доске выставлено больше, объявляется победителем. В случае равенства количества фишек засчитывается ничья.");
+                    Console.WriteLine("В игре используется квадратная доска размером 8 × 8 клеток (все клетки могут быть одного цвета) и 64 специальные фишки, окрашенные с разных сторон в контрастные цвета, например, в белый и чёрный. Клетки доски нумеруются от верхнего левого угла: вертикали — латинскими буквами, горизонтали — цифрами (по сути дела, можно использовать шахматную доску). Один из игроков играет белыми, другой — чёрными. Делая ход, игрок ставит фишку на клетку доски «своим» цветом вверх.\r\n\r\nВ начале игры в центр доски выставляются 4 фишки: чёрные на d5 и e4, белые на d4 и e5.\r\n\r\nПервый ход делают чёрные. Далее игроки ходят по очереди.\r\nДелая ход, игрок должен поставить свою фишку на одну из клеток доски таким образом, чтобы между этой поставленной фишкой и одной из имеющихся уже на доске фишек его цвета находился непрерывный ряд фишек соперника, горизонтальный, вертикальный или диагональный (другими словами, чтобы непрерывный ряд фишек соперника оказался «закрыт» фишками игрока с двух сторон). Все фишки соперника, входящие в «закрытый» на этом ходе ряд, переворачиваются на другую сторону (меняют цвет) и переходят к ходившему игроку.\r\nЕсли в результате одного хода «закрывается» одновременно более одного ряда фишек противника, то переворачиваются все фишки, оказавшиеся на тех «закрытых» рядах, которые идут от поставленной фишки.\r\nИгрок вправе выбирать любой из возможных для него ходов. Если игрок имеет возможные ходы, он не может отказаться от хода. Если игрок не имеет допустимых ходов, то ход передаётся сопернику.\r\nИгра прекращается, когда на доску выставлены все фишки или когда ни один из игроков не может сделать хода. По окончании игры проводится подсчёт фишек каждого цвета, и игрок, чьих фишек на доске выставлено больше, объявляется победителем. В случае равенства количества фишек засчитывается ничья.");
                     Console.ReadKey();
                     break;
 
+                case Choices.continueGame:
+                    var saved = GameSaver.LoadSavedGame();
+                    if (saved == null)
+                    {
+                        Console.WriteLine("Нет сохранённой игры!");
+                        System.Threading.Thread.Sleep(1500);
+                        break;
+                    }
 
+                    Player p1 = saved.IsPlayer1Human
+                        ? new HumanPlayer(saved.Player1Name, ReversiBoard.BLACK)
+                        : new AIPlayer(saved.Player1Name, ReversiBoard.BLACK);
 
+                    Player p2 = saved.IsPlayer2Human
+                        ? new HumanPlayer(saved.Player2Name, ReversiBoard.WHITE)
+                        : new AIPlayer(saved.Player2Name, ReversiBoard.WHITE);
+
+                    var resumedGame = new ReversiGame(p1, p2);
+                    resumedGame.ResumeFrom(saved);
+                    break;
 
                 case Choices.exit:
                     Console.WriteLine("Выход из игры...");
                     return;
-
-
             }
         }
     }
-
 }
