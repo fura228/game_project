@@ -677,7 +677,7 @@ public class Program
             Console.WriteLine("=== Меню Реверси ===");
             Console.WriteLine("1. Ввести имена игроков и начать игру");
             Console.WriteLine("2. Игра с ботом");
-            Console.WriteLine("3. Ranked Ladder");
+            Console.WriteLine("3. Таблица лидеров");
             Console.WriteLine("4. Правила");
             if (GameSaver.HasSavedGame())
             {
@@ -763,3 +763,4 @@ public class Program
         }
     }
 }
+
