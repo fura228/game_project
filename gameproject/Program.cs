@@ -103,7 +103,7 @@ public class AIPlayer : Player
         int r = validMoves[index, 0];
         int c = validMoves[index, 1];
 
-        Console.WriteLine($"Бот делает ход: {r}, {c}");
+        Console.WriteLine($"Бот делает ход: {r+1}, {c+1}");
         Console.WriteLine("Нажмите Enter, чтобы продолжить...");
         Console.ReadKey(intercept: true);
         return (r, c);
@@ -642,4 +642,5 @@ public class Program
             }
         }
     }
+
 }
